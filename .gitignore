@@ -1,41 +1,25 @@
-# Prerequisites
-*.d
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.egg
 
-# Precompiled Headers
-*.gch
-*.pch
+# Unit test / coverage reports
+.tox/
+.coverage
+.pytest_cache/
 
-# Linker files
-*.ilk
+# Environments
+.env
+.venv
+env/
+venv/
 
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# debug information files
-*.dwo
+# IDE/Editor specifics
+.vscode/
+.idea/
+*.swp
