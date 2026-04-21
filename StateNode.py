@@ -1,7 +1,7 @@
 class StateNode:    
-    def __init__(self, name):
+    def __init__(self, name, transfers={}):
         self.name = name
-        self.transfers = {}
+        self.transfers = transfers
 
     def __repr__(self):
         s = "State: " + self.name
@@ -10,9 +10,10 @@ class StateNode:
             s += "\n\t" + key + "->" + value.name
         s += '\n'
         return s
-
-    def addTransfer(self, event, node):
+        
+    def AddTransfer(self, event, node):
         self.transfers[event] = node
+        return
 
     def Transfer(self, event):
         return self.transfers(event)

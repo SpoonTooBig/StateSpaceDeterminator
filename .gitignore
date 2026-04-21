@@ -23,3 +23,5 @@ venv/
 .vscode/
 .idea/
 *.swp
+
+state_space.png
