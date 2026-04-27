@@ -1,32 +1,15 @@
 import random
 import StateNode as sn
 from graphviz import Digraph
+import itertools
 
 class StateSpace:    
     ECHR = 97 # Character code for 'A', useful for event naming logic
-    def __init__(self, size):
-        self.states = []
+    def __init__(self, size, states):
+        self.size = size
         self.eventHistory = ''
         self.stateHistory = ''
-        self.currentState = None
-        self.size = size
-
-        allEvents = list((chr(i) for i in range(ord(chr(self.ECHR)), ord(chr(self.ECHR + size)))))
-
-        for i in range(0, size):
-            stateName = str(i)
-            node = sn.StateNode(stateName)
-            self.states.append(node)
-
-        for state in self.states:
-            # Build list of state transfers randomly for each node
-            transferNum = random.randint(1, size-1)
-            availableStates = [x for x in self.states if x.name != state.name]
-            randStates = random.sample(availableStates, transferNum)
-            randEvents = random.sample(allEvents, transferNum)
-            transfers = dict(zip(randEvents, randStates))
-            state.transfers = transfers
-
+        self.states = states
         self.currentState = self.states[0]
 
     def traverse(self, iterations):
@@ -52,8 +35,41 @@ class StateSpace:
         dot.render(filename, cleanup=True)
         print(f"State space diagram saved as '{filename}.png'")
 
+    def save_to_file(self, filename):
+        import json
+        data = []
+        for state in self.states:
+            transfers = {event: target.name for event, target in state.transfers.items()}
+            data.append({
+                'name': state.name,
+                'transfers': transfers
+            })
+        with open(filename, 'w') as f:
+            json.dump(data, f, indent=4)
+
     def __repr__(self):
         s = ''
         for state in self.states:
             s += repr(state)
         return s
+    
+    def __eq__(self, other):
+        if not isinstance(other, StateSpace):
+            return NotImplemented
+        if self.size != other.size:
+            return False
+        
+        # Check if the state spaces are structurally identical (graph isomorphism)
+        # regardless of state names
+        for perm in itertools.permutations(other.states):
+            mapping = dict(zip(self.states, perm))
+            match = True
+            for self_state, other_state in mapping.items():
+                # Map self's targets to other's corresponding states
+                self_transfers_mapped = {event: mapping[target] for event, target in self_state.transfers.items()}
+                if self_transfers_mapped != other_state.transfers:
+                    match = False
+                    break
+            if match:
+                return True
+        return False

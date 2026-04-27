@@ -1,0 +1,50 @@
+import StateSpace as ss
+import StateNode as sn
+import random
+
+class StateSpaceFactory:
+    @staticmethod
+    def create_random(size):        
+        ECHR = 65
+        states = []
+        currentState = None
+        size = size
+
+        allEvents = list((chr(i) for i in range(ord(chr(ECHR)), ord(chr(ECHR + size)))))
+
+        for i in range(0, size):
+            stateName = str(i)
+            node = sn.StateNode(stateName)
+            states.append(node)
+
+        for state in states:
+            # Build list of state transfers randomly for each node
+            transferNum = random.randint(1, size-1)
+            availableStates = [x for x in states if x.name != state.name]
+            randStates = random.sample(availableStates, transferNum)
+            randEvents = random.sample(allEvents, transferNum)
+            transfers = dict(zip(randEvents, randStates))
+            state.transfers = transfers
+
+        return ss.StateSpace(size, states)
+
+
+    @staticmethod
+    def load_from_file(filename):
+        import json
+        with open(filename, 'r') as f:
+            data = json.load(f)
+        
+        state_nodes = []
+        # First, create nodes
+        for item in data:
+            node = sn.StateNode(item['name'])
+            state_nodes.append(node)
+        
+        # Then, set transfers
+        name_to_node = {node.name: node for node in state_nodes}
+        for item, node in zip(data, state_nodes):
+            for event, target_name in item['transfers'].items():
+                node.AddTransfer(event, name_to_node[target_name])
+        
+        return ss.StateSpace(len(state_nodes), state_nodes)

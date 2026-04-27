@@ -1,7 +1,7 @@
 class StateNode:    
-    def __init__(self, name, transfers={}):
+    def __init__(self, name, transfers=None):
         self.name = name
-        self.transfers = transfers
+        self.transfers = transfers.copy() if transfers else {}
 
     def __repr__(self):
         s = "State: " + self.name
