@@ -25,5 +25,6 @@ venv/
 *.swp
 
 *.png
+*.json
 Graphs/
 Saves/
