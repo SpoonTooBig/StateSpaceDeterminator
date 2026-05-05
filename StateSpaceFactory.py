@@ -5,7 +5,7 @@ import random
 class StateSpaceFactory:
     @staticmethod
     def create_random(size):        
-        ECHR = 65
+        ECHR = 97
         states = []
         currentState = None
         size = size

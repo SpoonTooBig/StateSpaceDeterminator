@@ -24,4 +24,6 @@ venv/
 .idea/
 *.swp
 
-state_space.png
+*.png
+Graphs/
+Saves/

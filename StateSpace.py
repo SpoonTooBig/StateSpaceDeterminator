@@ -4,7 +4,7 @@ from graphviz import Digraph
 import itertools
 
 class StateSpace:    
-    ECHR = 97 # Character code for 'A', useful for event naming logic
+    ECHR = 97 
     def __init__(self, size, states):
         self.size = size
         self.eventHistory = ''
@@ -32,8 +32,8 @@ class StateSpace:
             for event, target_state in state.transfers.items():
                 dot.edge(state.name, target_state.name, label=event)
         
-        dot.render(filename, cleanup=True)
-        print(f"State space diagram saved as '{filename}.png'")
+        dot.render(f"Graphs/{filename}", cleanup=True)
+        print(f"State space diagram saved as 'Graphs/{filename}.png'")
 
     def save_to_file(self, filename):
         import json
@@ -44,7 +44,7 @@ class StateSpace:
                 'name': state.name,
                 'transfers': transfers
             })
-        with open(filename, 'w') as f:
+        with open(f"Saves/{filename}.json", 'w') as f:
             json.dump(data, f, indent=4)
 
     def __repr__(self):
@@ -66,10 +66,44 @@ class StateSpace:
             match = True
             for self_state, other_state in mapping.items():
                 # Map self's targets to other's corresponding states
-                self_transfers_mapped = {event: mapping[target] for event, target in self_state.transfers.items()}
+                self_transfers_mapped = {}
+                for event, target in self_state.transfers.items():
+                    self_transfers_mapped[event] = mapping[target]
                 if self_transfers_mapped != other_state.transfers:
                     match = False
                     break
             if match:
                 return True
         return False
+
+    def similarity_score(self, other):
+        """
+        Compute a similarity score between 0 and 1 based on structural similarity.
+        1 means identical, 0 means completely different.
+        """
+        if not isinstance(other, StateSpace):
+            return 0.0
+        if self.size != other.size:
+            return 0.0
+        
+        max_score = 0.0
+        total_transitions = sum(len(state.transfers) for state in self.states)
+        if total_transitions == 0:
+            return 1.0 if self.size == other.size else 0.0
+        
+        for perm in itertools.permutations(other.states):
+            mapping = dict(zip(self.states, perm))
+            matching_transitions = 0
+            for self_state, other_state in mapping.items():
+                # Map self's targets to other's corresponding states
+                self_transfers_mapped = {}
+                for event, target in self_state.transfers.items():
+                    self_transfers_mapped[event] = mapping[target]
+                # Count matching transitions
+                for event, target in self_transfers_mapped.items():
+                    if event in other_state.transfers and other_state.transfers[event] == target:
+                        matching_transitions += 1
+            score = matching_transitions / total_transitions
+            if score > max_score:
+                max_score = score
+        return max_score
