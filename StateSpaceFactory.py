@@ -48,3 +48,22 @@ class StateSpaceFactory:
                 node.AddTransfer(event, name_to_node[target_name])
         
         return ss.StateSpace(len(state_nodes), state_nodes)
+    
+    @staticmethod
+    def from_histories(event_history, state_history):
+        zero_state = sn.StateNode('0')
+        nodes = {'0': zero_state}
+        for i in range(1, len(event_history)):
+            current_state_str = state_history[i]
+            prev_state_str = state_history[i-1]
+            event_to_reach_current = event_history[i-1]
+
+            # Check if the state already exists, if not create it    
+            if current_state_str not in nodes:
+                nodes[current_state_str] = sn.StateNode(current_state_str)
+
+            nodes[prev_state_str].AddTransfer(event_to_reach_current, nodes[current_state_str])    
+        
+        return ss.StateSpace(len(nodes), list(nodes.values()))
+
+

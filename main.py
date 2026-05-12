@@ -5,21 +5,25 @@ import StateSpaceFactory as ssf
 def main():
 
     ss1 = ssf.StateSpaceFactory.load_from_file('Saves/ss1.json')
+    ss1_2 = ssf.StateSpaceFactory.load_from_file('Saves/ss1.json')
     ss2 = ssf.StateSpaceFactory.load_from_file('Saves/ss2.json')
 
-    ss1.visualize('ss1_visualized')
-    ss2.visualize('ss2_visualized')
+    ss1.traverse(100)
 
-    print(f"ss1 == ss2: {ss1 == ss2}")
-    print(f"Similarity between ss1 and ss2: {ss1.similarity_score(ss2)}")
+    ss1_2_states = ss1_2.string_traverse(ss1.eventHistory)
+    ss2_states = ss2.string_traverse(ss1.eventHistory)
 
-    ss3 = ssf.StateSpaceFactory.create_random(3)
-    ss4 = ssf.StateSpaceFactory.create_random(3)
-    ss3.save_to_file('ss3')
-    ss4.save_to_file('ss4')
-    ss3.visualize('ss3_visualized')
-    ss4.visualize('ss4_visualized')
+    print(f"Event String: {ss1.eventHistory}")
 
-    print(f"Similarity between ss3 and ss4: {ss3.similarity_score(ss4)}")
+    print("SS1 State History: ", ss1.stateHistory)
+    print("SS1_2 State History: ", ss1_2_states)
+    print("SS2 State History: ", ss2_states)
+
+    print(ss1_2_states == ss1.stateHistory)
+    print(ss2_states == ss1.stateHistory)
+
+    ss1_from_history = ssf.StateSpaceFactory.from_histories(ss1.eventHistory, ss1.stateHistory)
+    print(ss1_from_history == ss1)
+
 if __name__ == "__main__":
     main()

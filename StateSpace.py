@@ -46,7 +46,17 @@ class StateSpace:
             })
         with open(f"Saves/{filename}.json", 'w') as f:
             json.dump(data, f, indent=4)
+    
+    def string_traverse(self, event_sequence):
+        stateHistory = ''
+        self.currentState = self.states[0]
+        for event in event_sequence:
+            if event in self.currentState.transfers:
+                stateHistory += self.currentState.name                
+                self.currentState = self.currentState.transfers[event]
 
+        return stateHistory
+    
     def __repr__(self):
         s = ''
         for state in self.states:
@@ -58,10 +68,14 @@ class StateSpace:
             return NotImplemented
         if self.size != other.size:
             return False
+        if self.size == 0:
+            return True
         
         # Check if the state spaces are structurally identical (graph isomorphism)
-        # regardless of state names
+        # regardless of state names, but require state zero to match exactly.
         for perm in itertools.permutations(other.states):
+            if perm[0] is not other.states[0]:
+                continue
             mapping = dict(zip(self.states, perm))
             match = True
             for self_state, other_state in mapping.items():
@@ -85,13 +99,17 @@ class StateSpace:
             return 0.0
         if self.size != other.size:
             return 0.0
+        if self.size == 0:
+            return 1.0
         
         max_score = 0.0
         total_transitions = sum(len(state.transfers) for state in self.states)
         if total_transitions == 0:
-            return 1.0 if self.size == other.size else 0.0
+            return 1.0 if self.states[0] is other.states[0] else 0.0
         
         for perm in itertools.permutations(other.states):
+            if perm[0] is not other.states[0]:
+                continue
             mapping = dict(zip(self.states, perm))
             matching_transitions = 0
             for self_state, other_state in mapping.items():
