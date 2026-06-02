@@ -1,3 +1,4 @@
+import os
 import random
 import StateNode as sn
 from graphviz import Digraph
@@ -13,6 +14,8 @@ class StateSpace:
         self.currentState = self.states[0]
 
     def traverse(self, iterations):
+        self.eventHistory = ''
+        self.stateHistory = ''
         for i in range(0, iterations):
             self.stateHistory += self.currentState.name
             event = random.choice(list(self.currentState.transfers))
@@ -20,7 +23,7 @@ class StateSpace:
             self.currentState = self.currentState.transfers[event]
 
 
-    def visualize(self, filename='state_space'):
+    def visualize(self, filename='state_space', location='Graphs'):
         dot = Digraph(comment='State Space Diagram', format='png')
         dot.attr(rankdir='LR')  # Left to right layout
         dot.attr('node', shape='circle', style='filled', fillcolor='lightblue')
@@ -32,11 +35,13 @@ class StateSpace:
             for event, target_state in state.transfers.items():
                 dot.edge(state.name, target_state.name, label=event)
         
-        dot.render(f"Graphs/{filename}", cleanup=True)
-        print(f"State space diagram saved as 'Graphs/{filename}.png'")
+        dot.render(f"{location}/{filename}", cleanup=True)
+        print(f"State space diagram saved as '{location}/{filename}.png'")
 
     def save_to_file(self, filename):
         import json
+        # Create the directory if it doesn't exist
+        os.makedirs('Saves', exist_ok=True) 
         data = []
         for state in self.states:
             transfers = {event: target.name for event, target in state.transfers.items()}
