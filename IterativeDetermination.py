@@ -137,7 +137,7 @@ def print_forks_analysis(forks):
     print(f"Distribution by depth: {distribution}")
     print(f"Max depth: {max_depth}")
 
-def reconstruct_state_space_from_forks(forks):
+def detect_loops_from_forks(forks):
     # Find max depth to initialize forks_by_depth as a list
     max_depth = max([fork['depth'] for fork in forks]) if forks else 0
     forks_by_depth = [[] for _ in range(max_depth + 1)]
@@ -146,15 +146,133 @@ def reconstruct_state_space_from_forks(forks):
     for fork in forks:
         depth = fork['depth']
         event_string = fork['event_string']
-        forks_by_depth[depth].append(event_string)
+        history = fork['history']
+        forks_by_depth[depth].append((event_string, history))
     
     print("\n=== Forks by Depth ===")
     for depth, event_strings in enumerate(forks_by_depth):
         if event_strings:
             print(f"Depth {depth}: {event_strings}")
 
-    print(f"\n {forks_by_depth}")
-    
+    # Build occurrences of full histories and event-strings
+    occurrences_by_event = {}
+    occurrences_by_full = {}
+    all_full_histories = []
+
+    for depth_list in forks_by_depth:
+        for event_string, history in depth_list:
+            # history is a list of parent fork event_strings (strings)
+            full_history = "".join(history + [event_string])
+            all_full_histories.append(full_history)
+
+            occurrences_by_full[full_history] = occurrences_by_full.get(full_history, 0) + 1
+
+            if event_string not in occurrences_by_event:
+                occurrences_by_event[event_string] = []
+            occurrences_by_event[event_string].append(full_history)
+
+    # Loops: strings that either repeat (same full history seen >1) or are length 2 (two characters)
+    loops = []
+    for fh, count in occurrences_by_full.items():
+        if count > 1 or len(fh) == 2:
+            loops.append(fh)
+
+    # Unresolved: full histories seen once and longer than 2
+    unresolved_loops = [fh for fh, count in occurrences_by_full.items() if count == 1 and len(fh) > 2]
+
+    def trim_history(full_history, known_loops):
+        """Remove any known loop substrings from the left of full_history until nothing left or no change."""
+        cur = full_history
+        changed = True
+        while changed and cur:
+            changed = False
+            for loop in known_loops:
+                if cur.startswith(loop):
+                    cur = cur[len(loop):]
+                    changed = True
+                    break
+        return cur
+
+    # Attempt to resolve unresolved_loops by trimming known loops
+    resolved = []
+    for fh in list(unresolved_loops):
+        trimmed = trim_history(fh, loops)
+        if not trimmed:
+            # fully explained by known loops
+            resolved.append(fh)
+            unresolved_loops.remove(fh)
+
+    # Add resolved ones to loops as well
+    for r in resolved:
+        if r not in loops:
+            loops.append(r)
+
+    print("\nDetected loops:", loops)
+    if unresolved_loops:
+        print("Unresolved candidate loops:", unresolved_loops)
+
+    return loops
+
+
+def create_state_space_from_loops(loops):
+    """
+    Create a StateSpace from a list of loop strings.
+    - `loops` is a list of strings, each string is a sequence of events (characters).
+    - Creates a single zero/start state and one branch per loop.
+    - For each loop, one new state is created per event; the last event's transition returns to the zero state.
+
+    Returns a new `ss.StateSpace` instance.
+    """
+    # Create zero state (numeric naming starting at 0)
+    name_counter = 0
+    zero = sn.StateNode(str(name_counter))
+    name_counter += 1
+    states = [zero]
+
+    for loop in loops:
+        if not loop:
+            continue
+        # start each loop from the zero state
+        prev = zero
+        # create nodes only for non-final events to avoid stranded nodes
+        for j, event in enumerate(loop):
+            # If this event already exists on the current state, reuse the
+            # existing target instead of overwriting it. This preserves any
+            # previously-created branches that start with the same event.
+            if event in prev.transfers:
+                # follow the existing branch
+                prev = prev.transfers[event]
+                continue
+
+            if j < len(loop) - 1:
+                node_name = str(name_counter)
+                new_node = sn.StateNode(node_name)
+                states.append(new_node)
+                name_counter += 1
+                prev.AddTransfer(event, new_node)
+                prev = new_node
+            else:
+                # final event transitions back to zero
+                prev.AddTransfer(event, zero)
+
+    return ss.StateSpace(len(states), states)
+
+
+def visualize_loops(loops, filename='loops_space', location='Loops'):
+    """Build a StateSpace from `loops` and visualize it.
+
+    Returns the constructed StateSpace.
+    """
+    if not loops:
+        print("No loops to visualize.")
+        return None
+
+    reconstructed = create_state_space_from_loops(loops)
+    try:
+        reconstructed.visualize(filename=filename, location=location)
+    except Exception as e:
+        print(f"Failed to visualize loops state space: {e}")
+    return reconstructed
 
 def run_iterative_refinement(strategy=RefinementStrategy.GREEDY, max_iterations=20):
     print('Iterative state-space reconstruction demo')
@@ -218,7 +336,9 @@ def main():
     # Analyze the forks in the safe space
     forks = analyze_forks(safe_space)
     print_forks_analysis(forks)
-    reconstruct_state_space_from_forks(forks)
+    loops = detect_loops_from_forks(forks)
+    if loops:
+        visualize_loops(loops)
 
 if __name__ == "__main__":
     main()
