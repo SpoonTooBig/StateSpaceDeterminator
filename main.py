@@ -8,7 +8,7 @@ def main():
     # ss1_2 = ssf.StateSpaceFactory.load_from_file('Saves/ss1.json')
     # ss2 = ssf.StateSpaceFactory.load_from_file('Saves/ss2.json')
 
-    # ss1.traverse(100)
+    # ss1.random_traverse(100)
 
     # ss1_2_states = ss1_2.string_traverse(ss1.eventHistory)
     # ss2_states = ss2.string_traverse(ss1.eventHistory)
@@ -25,18 +25,9 @@ def main():
     # ss1_from_history = ssf.StateSpaceFactory.from_histories(ss1.eventHistory, ss1.stateHistory)
     # print(ss1_from_history == ss1)
 
-    dave_ss = ssf.StateSpaceFactory.create_random(size=6)
-    dave_ss.visualize(filename='dave_ss', location='Graphs')
-    dave_ss.traverse(100)
-    print(dave_ss.eventHistory)
-    dave_ss.traverse(100)
-    print(dave_ss.eventHistory)
-    dave_ss.traverse(100)
-    print(dave_ss.eventHistory)
-    dave_ss.traverse(100)
-    print(dave_ss.eventHistory)
-    dave_ss.traverse(100)
-    print(dave_ss.eventHistory)
+    iterative_safe_space = ssf.StateSpaceFactory.load_from_file("Saves/iterative_safe_space.json")
+    iterative_safe_space.visualize(filename='iterative_safe_space', location='Graphs')
+    iterative_safe_space.random_traverse(20)
 
 if __name__ == "__main__":
     main()

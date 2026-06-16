@@ -13,7 +13,7 @@ class StateSpace:
         self.states = states
         self.currentState = self.states[0]
 
-    def traverse(self, iterations):
+    def random_traverse(self, iterations):
         self.eventHistory = ''
         self.stateHistory = ''
         for i in range(0, iterations):

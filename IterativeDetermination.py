@@ -137,7 +137,7 @@ def print_forks_analysis(forks):
     print(f"Distribution by depth: {distribution}")
     print(f"Max depth: {max_depth}")
 
-def detect_loops_from_forks(forks):
+def extract_loops_from_forks(forks):
     # Find max depth to initialize forks_by_depth as a list
     max_depth = max([fork['depth'] for fork in forks]) if forks else 0
     forks_by_depth = [[] for _ in range(max_depth + 1)]
@@ -258,30 +258,164 @@ def create_state_space_from_loops(loops):
     return ss.StateSpace(len(states), states)
 
 
-def visualize_loops(loops, filename='loops_space', location='Loops'):
-    """Build a StateSpace from `loops` and visualize it.
-
-    Returns the constructed StateSpace.
+def create_state_space_from_forks_prefix_merge(loops_or_forks):
     """
-    if not loops:
-        print("No loops to visualize.")
+    Build a state space from loop data using prefix-merging.
+
+    Accepts either:
+    - `loops_or_forks` as a list of loop strings (each string is a sequence of events),
+    - OR `loops_or_forks` as a list of fork tuples `(event_string, history_list)`
+        where `history_list` is a list of event-strings leading up to the fork.
+
+    The function converts fork tuples into full loop strings by concatenating
+    `history_list + [event_string]` and then builds nodes for each prefix.
+    The empty prefix is the zero/start node. Shared prefixes are merged.
+    The final event of each loop transitions back to the zero node.
+
+    This function is non-destructive: if a transfer already exists it will
+    not be overwritten.
+    """
+    name_counter = 0
+    zero = sn.StateNode(str(name_counter))
+    name_counter += 1
+    states = [zero]
+
+    prefix_map = {"": zero}
+
+    # Normalize input: support fork dicts, fork tuples, or loop strings
+    normalized_loops = []
+    for item in loops_or_forks:
+        if not item:
+            continue
+        # fork dict: {'event_string': ..., 'history': [...]}
+        if isinstance(item, dict) and 'event_string' in item and 'history' in item:
+            event_string = item['event_string']
+            history = item['history']
+            if not isinstance(history, (list, tuple)):
+                history = list(history)
+            full = "".join(list(history) + [event_string])
+            normalized_loops.append(full)
+            continue
+        # fork tuple: (event_string, history_list)
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            event_string, history = item
+            if not isinstance(history, (list, tuple)):
+                history = list(history)
+            full = "".join(list(history) + [event_string])
+            normalized_loops.append(full)
+            continue
+        # otherwise assume it's already a loop string
+        normalized_loops.append(str(item))
+    print(f"\n\n\n\n{normalized_loops}\n\n\n\n")
+    for loop in normalized_loops:
+        if not loop:
+            continue
+        cur = ""
+        for i, event in enumerate(loop):
+            nxt = cur + event
+            # If final event, ensure it points to zero (loop closure)
+            if i == len(loop) - 1:
+                src = prefix_map[cur]
+                if event not in src.transfers:
+                    src.AddTransfer(event, zero)
+                # done with this loop
+                break
+
+            # Ensure node exists for nxt prefix
+            if nxt not in prefix_map:
+                node = sn.StateNode(str(name_counter))
+                name_counter += 1
+                states.append(node)
+                prefix_map[nxt] = node
+
+            # Add transfer if missing
+            src = prefix_map[cur]
+            dst = prefix_map[nxt]
+            if event not in src.transfers:
+                src.AddTransfer(event, dst)
+
+            cur = nxt
+
+    return ss.StateSpace(len(states), states)
+
+
+def make_greedy_space_deterministic(source_space, max_depth=3):
+    """
+    Build a deterministic 'greedy' safe space from `source_space`.
+
+    Starting at the initial node of `source_space`, attempt events 'a', 'b',
+    ... up to the number of states in `source_space`. For each event that
+    exists on the current source node, add a corresponding transition and
+    new node to the constructed safe space. Recurse into the discovered
+    target in `source_space` and continue exploration up to `max_depth`.
+
+    This produces a deterministic tree-like safe space (no merging of
+    target nodes) where each discovered valid transition from the source
+    is included.
+
+    Parameters:
+    - source_space: an instance of `ss.StateSpace` to inspect (read-only).
+    - max_depth: maximum depth to explore (non-negative integer).
+
+    Returns a new `ss.StateSpace` instance representing the greedy safe space.
+    """
+    # Determine alphabet size: use number of states in source_space (clamped to 26)
+    max_events = min(max(0, source_space.size), 26)
+    events = [chr(ord('a') + i) for i in range(max_events)]
+
+    # Create zero/start node for the new safe space
+    name_counter = 0
+    zero = sn.StateNode(str(name_counter))
+    name_counter += 1
+    states = [zero]
+
+    def dfs(src_node, safe_prev, depth):
+        nonlocal name_counter
+        if depth <= 0:
+            return
+        for event in events:
+            # If the source node has this event, follow it and add to safe space
+            if event in src_node.transfers:
+                target_src = src_node.transfers[event]
+                # Create a fresh node in the safe space for this discovery
+                new_node = sn.StateNode(str(name_counter))
+                name_counter += 1
+                states.append(new_node)
+                safe_prev.AddTransfer(event, new_node)
+                # Recurse on the source-space target with decreased depth
+                dfs(target_src, new_node, depth - 1)
+
+    dfs(source_space.states[0], zero, max_depth)
+    return ss.StateSpace(len(states), states)
+
+
+def visualize_loops_from_forks(forks, filename='loops_space', location='Loops'):
+    """Build a StateSpace from fork data and visualize it.
+
+    `forks` should be the output of `analyze_forks` (a list of fork dicts).
+    This function will convert fork records to full-history strings and use
+    the prefix-merge builder to construct and visualize the state space.
+
+    Returns the constructed StateSpace or `None` on failure.
+    """
+    if not forks:
+        print("No forks to visualize.")
         return None
 
-    reconstructed = create_state_space_from_loops(loops)
+    reconstructed = create_state_space_from_forks_prefix_merge(forks)
     try:
         reconstructed.visualize(filename=filename, location=location)
     except Exception as e:
-        print(f"Failed to visualize loops state space: {e}")
+        print(f"Failed to visualize forks-derived state space: {e}")
     return reconstructed
 
-def run_iterative_refinement(strategy=RefinementStrategy.GREEDY, max_iterations=20):
+def run_iterative_refinement(source_space, strategy=RefinementStrategy.GREEDY, max_iterations=20):
     print('Iterative state-space reconstruction demo')
     print(f'Using refinement strategy: {strategy.value}')
     print(f'Max iterations: {max_iterations}')
-    source_space = build_random_source_state_space(size=3)
     source_space.visualize(filename='source_space', location='Iterations')
     initial_iterations = 20
-    source_space.traverse(initial_iterations)
+    source_space.random_traverse(initial_iterations)
     event_history = source_space.eventHistory
     print('Initial trace length:', len(event_history))
     print('Initial event history:', event_history)
@@ -297,7 +431,7 @@ def run_iterative_refinement(strategy=RefinementStrategy.GREEDY, max_iterations=
         source_space.eventHistory = ''
         source_space.stateHistory = ''
         source_space.currentState = source_space.states[0]
-        source_space.traverse(initial_iterations)
+        source_space.random_traverse(initial_iterations)
         event_history = source_space.eventHistory
         print('Observed event history:', event_history)
 
@@ -328,17 +462,28 @@ def main():
     
     strategy = RefinementStrategy.GREEDY if args.strategy == 'greedy' else RefinementStrategy.GREEDY
     if args.from_save:
-        safe_space = ssf.StateSpaceFactory.load_from_file(args.from_save)
+        source_space = ssf.StateSpaceFactory.load_from_file(args.from_save)
     else:
-        safe_space = run_iterative_refinement(strategy=strategy, max_iterations=args.max_iterations)
-        safe_space.save_to_file('iterative_safe_space')
+        source_space = build_random_source_state_space(size=3)
+        source_space.save_to_file('source_space')
+    
+    
+    # safe_space = run_iterative_refinement(source_space, strategy=strategy, max_iterations=args.max_iterations)
+    # safe_space.save_to_file('iterative_safe_space')
+
+    safe_space = make_greedy_space_deterministic(source_space, 10)
+    safe_space.save_to_file('deterministic_safe_space')
+    safe_space.visualize(filename='deterministic_safe_space', location='Graphs')
 
     # Analyze the forks in the safe space
     forks = analyze_forks(safe_space)
-    print_forks_analysis(forks)
-    loops = detect_loops_from_forks(forks)
-    if loops:
-        visualize_loops(loops)
+    ss = create_state_space_from_forks_prefix_merge(forks)
+    # print_forks_analysis(forks)
+    ss.visualize(filename='generated_space', location='Graphs')
+    # Visualize directly from fork records (no loop-string conversion step)
+    # if forks:
+    #     visualize_loops_from_forks(forks)
+
 
 if __name__ == "__main__":
     main()
