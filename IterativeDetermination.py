@@ -3,6 +3,7 @@ import StateSpace as ss
 import StateSpaceFactory as ssf
 from enum import Enum
 import argparse
+import itertools
 
 
 class RefinementStrategy(Enum):
@@ -90,6 +91,112 @@ def analyze_forks(state_space):
     
     dfs(state_space.states[0], '', 0, [], [])
     return forks
+
+def find_repeating_patterns_in_lists(sequences, **kwargs):
+    """Apply pattern finding to a list of sequences."""
+    return [find_repeating_patterns(seq, **kwargs) for seq in sequences]
+
+
+def _canonicalize_partition(assignments):
+    """Normalize a partition assignment to a canonical label order."""
+    label_map = {}
+    next_label = 0
+    canonical = []
+    for label in assignments:
+        if label not in label_map:
+            label_map[label] = next_label
+            next_label += 1
+        canonical.append(label_map[label])
+    return tuple(canonical)
+
+
+def enumerate_partitions(labels, num_blocks):
+    """Enumerate all unique partitions of labels into num_blocks non-empty groups."""
+    if num_blocks < 1:
+        raise ValueError('num_blocks must be at least 1')
+    labels = list(labels)
+    if num_blocks > len(labels):
+        return []
+
+    normalized = set()
+    partitions = []
+    for assignment in itertools.product(range(num_blocks), repeat=len(labels)):
+        if len(set(assignment)) != num_blocks:
+            continue
+        canonical = _canonicalize_partition(assignment)
+        if canonical in normalized:
+            continue
+        normalized.add(canonical)
+        partitions.append(dict(zip(labels, canonical)))
+
+    return partitions
+
+
+def _build_graph_from_path_assignments(transitions, partition, intermediate_assignments, num_states):
+    """Build a deterministic state space from a partition and path assignments."""
+    states = [sn.StateNode(str(i)) for i in range(num_states)]
+
+    for (src, dst), intermediate in zip(transitions, intermediate_assignments):
+        src_state = states[partition[src]]
+        dst_state = states[partition[dst]]
+        chars = list(dst)
+
+        if not chars:
+            continue
+
+        current = src_state
+        for step, char in enumerate(chars):
+            target_state = dst_state if step == len(chars) - 1 else states[intermediate[step]]
+            if char in current.transfers and current.transfers[char] is not target_state:
+                return None
+            current.AddTransfer(char, target_state)
+            current = target_state
+
+    return ss.StateSpace(num_states, states)
+
+
+def build_state_spaces_from_transition_pairs(transitions, num_states, max_results=None):
+    """Construct every possible state space from transitions interpreted as character paths.
+
+    Each transition pair is treated as a source label and a destination label string.
+    The destination string is expanded into a sequence of single-character edges.
+
+    Returns a list of tuples `(partition_map, intermediate_assignment, state_space)`.
+    """
+    if not isinstance(transitions, (list, tuple)):
+        raise TypeError('transitions must be a list or tuple of (source, destination) pairs')
+
+    labels = sorted({label for pair in transitions for label in pair})
+    partitions = enumerate_partitions(labels, num_states)
+    if not partitions:
+        return []
+
+    transition_choices = []
+    for _, dst in transitions:
+        edge_steps = max(0, len(dst) - 1)
+        transition_choices.append(list(itertools.product(range(num_states), repeat=edge_steps)))
+
+    state_spaces = []
+    seen_signatures = set()
+
+    for partition in partitions:
+        for intermediate_assignment in itertools.product(*transition_choices):
+            graph = _build_graph_from_path_assignments(transitions, partition, intermediate_assignment, num_states)
+            if graph is None:
+                continue
+
+            signature = tuple(
+                tuple(sorted((event, int(target.name)) for event, target in state.transfers.items()))
+                for state in graph.states
+            )
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            state_spaces.append((partition, intermediate_assignment, graph))
+            if max_results is not None and len(state_spaces) >= max_results:
+                return state_spaces
+
+    return state_spaces
 
 
 def print_forks_analysis(forks):
@@ -337,7 +444,7 @@ def create_state_space_from_forks_prefix_merge(loops_or_forks):
 
     return ss.StateSpace(len(states), states)
 
-def forks_to_safe_space(forks):
+def get_possible_transitions(forks):
 
     def get_full_history(fork):
         return fork['history'] + [fork['event_string']]
@@ -349,7 +456,7 @@ def forks_to_safe_space(forks):
         history = fork['history']
         depth = fork['depth']
         full_history = get_full_history(fork)
-        print(full_history)
+        print(full_history, "bubaf")
         simple_fork = (event, history)
         simplified_forks.append((event, history))
 
@@ -359,7 +466,19 @@ def forks_to_safe_space(forks):
             transition = (full_history[i-1], full_history[i])
             if transition not in possible_transitions:
                 possible_transitions.append(transition)
-    print(possible_transitions)   
+    return possible_transitions   
+
+def forks_to_histories(forks):
+    """
+    Convert a list of fork dictionaries into a list of full histories.
+    Each history is the concatenation of the fork's parent history and its event string.
+    """
+    histories = []
+    for fork in forks:
+        if 'history' in fork and 'event_string' in fork:
+            full_history = fork['history'] + [fork['event_string']]
+            histories.append(full_history)
+    return histories
 
 def make_greedy_space_deterministic(source_space, max_depth=3):
     """
@@ -472,14 +591,21 @@ def main():
     # safe_space = run_iterative_refinement(source_space, strategy=strategy, max_iterations=args.max_iterations)
     # safe_space.save_to_file('iterative_safe_space')
 
-    safe_space = make_greedy_space_deterministic(source_space, 10)
+    safe_space = make_greedy_space_deterministic(source_space, 15)
     safe_space.save_to_file('deterministic_safe_space')
     safe_space.visualize(filename='deterministic_safe_space', location='Graphs')
 
     # Analyze the forks in the safe space
     forks = analyze_forks(safe_space)
     ss = create_state_space_from_forks_prefix_merge(forks)
-    print(forks_to_safe_space(forks))
+    possible_transitions = get_possible_transitions(forks)
+    histories = forks_to_histories(forks)
+
+    state_spaces = build_state_spaces_from_transition_pairs(possible_transitions, 3)
+    print(state_spaces)
+    for i, space in enumerate(state_spaces):
+        space[2].visualize(filename=f'possible_space_{i}', location='Graphs')
+
     # print_forks_analysis(forks)
     ss.visualize(filename='generated_space', location='Graphs')
     # Visualize directly from fork records (no loop-string conversion step)
