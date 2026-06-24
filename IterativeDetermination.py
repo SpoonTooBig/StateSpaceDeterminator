@@ -306,7 +306,6 @@ def create_state_space_from_forks_prefix_merge(loops_or_forks):
             continue
         # otherwise assume it's already a loop string
         normalized_loops.append(str(item))
-    print(f"\n\n\n\n{normalized_loops}\n\n\n\n")
     for loop in normalized_loops:
         if not loop:
             continue
@@ -338,6 +337,29 @@ def create_state_space_from_forks_prefix_merge(loops_or_forks):
 
     return ss.StateSpace(len(states), states)
 
+def forks_to_safe_space(forks):
+
+    def get_full_history(fork):
+        return fork['history'] + [fork['event_string']]
+    
+    simplified_forks = []
+    possible_transitions = []
+    for fork in forks:
+        event = fork['event_string']
+        history = fork['history']
+        depth = fork['depth']
+        full_history = get_full_history(fork)
+        print(full_history)
+        simple_fork = (event, history)
+        simplified_forks.append((event, history))
+
+        for i in range(len(full_history)):
+            if i == 0:
+                continue
+            transition = (full_history[i-1], full_history[i])
+            if transition not in possible_transitions:
+                possible_transitions.append(transition)
+    print(possible_transitions)   
 
 def make_greedy_space_deterministic(source_space, max_depth=3):
     """
@@ -387,27 +409,6 @@ def make_greedy_space_deterministic(source_space, max_depth=3):
 
     dfs(source_space.states[0], zero, max_depth)
     return ss.StateSpace(len(states), states)
-
-
-def visualize_loops_from_forks(forks, filename='loops_space', location='Loops'):
-    """Build a StateSpace from fork data and visualize it.
-
-    `forks` should be the output of `analyze_forks` (a list of fork dicts).
-    This function will convert fork records to full-history strings and use
-    the prefix-merge builder to construct and visualize the state space.
-
-    Returns the constructed StateSpace or `None` on failure.
-    """
-    if not forks:
-        print("No forks to visualize.")
-        return None
-
-    reconstructed = create_state_space_from_forks_prefix_merge(forks)
-    try:
-        reconstructed.visualize(filename=filename, location=location)
-    except Exception as e:
-        print(f"Failed to visualize forks-derived state space: {e}")
-    return reconstructed
 
 def run_iterative_refinement(source_space, strategy=RefinementStrategy.GREEDY, max_iterations=20):
     print('Iterative state-space reconstruction demo')
@@ -478,6 +479,7 @@ def main():
     # Analyze the forks in the safe space
     forks = analyze_forks(safe_space)
     ss = create_state_space_from_forks_prefix_merge(forks)
+    print(forks_to_safe_space(forks))
     # print_forks_analysis(forks)
     ss.visualize(filename='generated_space', location='Graphs')
     # Visualize directly from fork records (no loop-string conversion step)

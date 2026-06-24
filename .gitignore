@@ -23,9 +23,3 @@ venv/
 .vscode/
 .idea/
 *.swp
-
-*.png
-*.json
-Graphs/
-Saves/
-Iterations/
