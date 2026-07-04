@@ -3,6 +3,7 @@ import StateSpace as ss
 import StateSpaceFactory as ssf
 from enum import Enum
 import argparse
+import itertools
 
 
 class RefinementStrategy(Enum):
@@ -45,8 +46,35 @@ def can_reproduce_history(state_space, event_history):
     output = state_space.string_traverse(event_history)
     return len(output) == len(event_history)
 
+def analyze_forks_single_event(state_space):
+    """
+    Traverse the provided safe space and collect every pair of events
+    that can occur sequentially.
 
-def analyze_forks(state_space):
+    Returns a list of tuples like [("a", "a"), ("a", "b"), ("b", "c")].
+    """
+    sequential_pairs = []
+    seen_states = set()
+
+    def dfs(state):
+        if state.name in seen_states:
+            return
+        seen_states.add(state.name)
+
+        for first_event, next_state in state.transfers.items():
+            for second_event in next_state.transfers.keys():
+                pair = (first_event, second_event)
+                if pair not in sequential_pairs:
+                    sequential_pairs.append(pair)
+            dfs(next_state)
+
+    if state_space and state_space.states:
+        dfs(state_space.states[0])
+
+    return sequential_pairs
+
+
+def analyze_forks_multi_event(state_space):
     """
     Analyze forks in a state space using depth-first search.
     A fork is a state with more than one outgoing transition (multiple events).
@@ -90,7 +118,6 @@ def analyze_forks(state_space):
     
     dfs(state_space.states[0], '', 0, [], [])
     return forks
-
 
 def print_forks_analysis(forks):
     """Print fork analysis data in a human-readable format, sorted by depth."""
@@ -361,6 +388,81 @@ def forks_to_safe_space(forks):
                 possible_transitions.append(transition)
     print(possible_transitions)   
 
+
+def count_possible_state_spaces(event_pairs, num_states):
+    """
+    Compute the number of deterministic state spaces with `num_states` states
+    that satisfy the no-self-loop constraint and use the events present in
+    `event_pairs`.
+
+    This is the total number of possible transition assignments before any
+    sequential-pair filtering is applied.
+    """
+    if num_states <= 0:
+        return 0
+
+    alphabet = sorted({event for pair in event_pairs for event in pair})
+    if not alphabet:
+        return 0
+
+    choices_per_transition = num_states - 1
+    total_transitions = num_states * len(alphabet)
+    return choices_per_transition ** total_transitions
+
+
+def generate_state_spaces_from_event_pairs(event_pairs, num_states):
+    """
+    Generate every possible deterministic StateSpace with `num_states` states
+    that can realize the provided sequential event pairs.
+
+    Each pair is interpreted as two events that can occur in sequence, e.g.
+    ("a", "b") means there is some state S where transition "a" leads to
+    state T and state T has a transition "b".
+
+    Returns a list of `ss.StateSpace` instances.
+    """
+    if num_states <= 0:
+        return []
+
+    alphabet = sorted({event for pair in event_pairs for event in pair})
+    if not alphabet:
+        return []
+
+    state_spaces = []
+    state_indices = range(num_states)
+    transition_positions = num_states * len(alphabet)
+
+    for assignment in itertools.product(state_indices, repeat=transition_positions):
+        if any(target_idx == state_idx for state_idx in state_indices for target_idx in [assignment[state_idx * len(alphabet) + event_idx] for event_idx in range(len(alphabet))]):
+            continue
+
+        # Build states for this assignment
+        states = [sn.StateNode(str(i)) for i in state_indices]
+        for state_idx in state_indices:
+            for event_idx, event in enumerate(alphabet):
+                target_idx = assignment[state_idx * len(alphabet) + event_idx]
+                states[state_idx].AddTransfer(event, states[target_idx])
+
+        valid = True
+        for first_event, second_event in event_pairs:
+            pair_found = False
+            for state in states:
+                if first_event not in state.transfers:
+                    continue
+                intermediate = state.transfers[first_event]
+                if second_event in intermediate.transfers:
+                    pair_found = True
+                    break
+            if not pair_found:
+                valid = False
+                break
+
+        if valid:
+            state_spaces.append(ss.StateSpace(len(states), states))
+
+    return state_spaces
+
+
 def make_greedy_space_deterministic(source_space, max_depth=3):
     """
     Build a deterministic 'greedy' safe space from `source_space`.
@@ -468,7 +570,8 @@ def main():
         source_space = build_random_source_state_space(size=3)
         source_space.save_to_file('source_space')
     
-    
+    source_space.visualize(filename='source_space', location='Graphs')
+       
     # safe_space = run_iterative_refinement(source_space, strategy=strategy, max_iterations=args.max_iterations)
     # safe_space.save_to_file('iterative_safe_space')
 
@@ -477,15 +580,11 @@ def main():
     safe_space.visualize(filename='deterministic_safe_space', location='Graphs')
 
     # Analyze the forks in the safe space
-    forks = analyze_forks(safe_space)
-    ss = create_state_space_from_forks_prefix_merge(forks)
-    print(forks_to_safe_space(forks))
-    # print_forks_analysis(forks)
-    ss.visualize(filename='generated_space', location='Graphs')
-    # Visualize directly from fork records (no loop-string conversion step)
-    # if forks:
-    #     visualize_loops_from_forks(forks)
-
+    event_pairs = analyze_forks_single_event(safe_space)
+    print(event_pairs)
+    state_spaces = generate_state_spaces_from_event_pairs(event_pairs, 3)
+    for i, state_space in enumerate(state_spaces):
+        state_space.visualize(filename=f'generated_space_{i}', location='Graphs')
 
 if __name__ == "__main__":
     main()
