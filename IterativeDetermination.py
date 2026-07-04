@@ -364,7 +364,7 @@ def create_state_space_from_forks_prefix_merge(loops_or_forks):
 
     return ss.StateSpace(len(states), states)
 
-def forks_to_safe_space(forks):
+def get_possible_transitions(forks):
 
     def get_full_history(fork):
         return fork['history'] + [fork['event_string']]
@@ -376,7 +376,7 @@ def forks_to_safe_space(forks):
         history = fork['history']
         depth = fork['depth']
         full_history = get_full_history(fork)
-        print(full_history)
+        print(full_history, "bubaf")
         simple_fork = (event, history)
         simplified_forks.append((event, history))
 
@@ -386,7 +386,19 @@ def forks_to_safe_space(forks):
             transition = (full_history[i-1], full_history[i])
             if transition not in possible_transitions:
                 possible_transitions.append(transition)
-    print(possible_transitions)   
+    return possible_transitions   
+
+def forks_to_histories(forks):
+    """
+    Convert a list of fork dictionaries into a list of full histories.
+    Each history is the concatenation of the fork's parent history and its event string.
+    """
+    histories = []
+    for fork in forks:
+        if 'history' in fork and 'event_string' in fork:
+            full_history = fork['history'] + [fork['event_string']]
+            histories.append(full_history)
+    return histories
 
 
 def count_possible_state_spaces(event_pairs, num_states):
@@ -575,7 +587,7 @@ def main():
     # safe_space = run_iterative_refinement(source_space, strategy=strategy, max_iterations=args.max_iterations)
     # safe_space.save_to_file('iterative_safe_space')
 
-    safe_space = make_greedy_space_deterministic(source_space, 10)
+    safe_space = make_greedy_space_deterministic(source_space, 15)
     safe_space.save_to_file('deterministic_safe_space')
     safe_space.visualize(filename='deterministic_safe_space', location='Graphs')
 
