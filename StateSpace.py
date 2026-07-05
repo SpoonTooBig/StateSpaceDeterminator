@@ -21,6 +21,7 @@ class StateSpace:
             event = random.choice(list(self.currentState.transfers))
             self.eventHistory += str(event)
             self.currentState = self.currentState.transfers[event]
+        return self.eventHistory
 
 
     def visualize(self, filename='state_space', location='Graphs'):
@@ -62,6 +63,15 @@ class StateSpace:
 
         return stateHistory
     
+    def valid_language(self, event_sequence):
+        self.currentState = self.states[0]
+        for event in event_sequence:
+            if event not in self.currentState.transfers:
+                return False
+            else:
+                self.currentState = self.currentState.Transfer(event)
+        return True
+
     def __repr__(self):
         s = ''
         for state in self.states:

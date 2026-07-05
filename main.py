@@ -25,9 +25,13 @@ def main():
     # ss1_from_history = ssf.StateSpaceFactory.from_histories(ss1.eventHistory, ss1.stateHistory)
     # print(ss1_from_history == ss1)
 
-    iterative_safe_space = ssf.StateSpaceFactory.load_from_file("Saves/iterative_safe_space.json")
-    iterative_safe_space.visualize(filename='iterative_safe_space', location='Graphs')
-    iterative_safe_space.random_traverse(20)
+    ss1 = ssf.StateSpaceFactory.load_from_file("Saves/ss1.json")
+    ss2 = ssf.StateSpaceFactory.load_from_file("Saves/ss2.json")
+
+    ss1.visualize(filename='ss1', location='Graphs')
+    ss2.visualize(filename='ss2', location='Graphs')
+    
+    print(ss1.valid_language(ss1.random_traverse(100)))
 
 if __name__ == "__main__":
     main()

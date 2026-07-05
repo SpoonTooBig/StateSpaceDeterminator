@@ -16,4 +16,4 @@ class StateNode:
         return
 
     def Transfer(self, event):
-        return self.transfers(event)
+        return self.transfers[event]

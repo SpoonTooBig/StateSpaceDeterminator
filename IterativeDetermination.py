@@ -431,6 +431,11 @@ def generate_state_spaces_from_event_pairs(event_pairs, num_states):
     ("a", "b") means there is some state S where transition "a" leads to
     state T and state T has a transition "b".
 
+    Unlike the previous implementation, each state may now have any number of
+    outgoing transitions between one and the size of the event alphabet, and
+    the event subset for each state can be any combination of the available
+    events.
+
     Returns a list of `ss.StateSpace` instances.
     """
     if num_states <= 0:
@@ -441,37 +446,52 @@ def generate_state_spaces_from_event_pairs(event_pairs, num_states):
         return []
 
     state_spaces = []
-    state_indices = range(num_states)
-    transition_positions = num_states * len(alphabet)
+    state_indices = list(range(num_states))
 
-    for assignment in itertools.product(state_indices, repeat=transition_positions):
-        if any(target_idx == state_idx for state_idx in state_indices for target_idx in [assignment[state_idx * len(alphabet) + event_idx] for event_idx in range(len(alphabet))]):
-            continue
+    def build_state_patterns(state_idx):
+        patterns = []
+        for transition_count in range(1, len(alphabet) + 1):
+            for selected_events in itertools.combinations(alphabet, transition_count):
+                for targets in itertools.product(state_indices, repeat=transition_count):
+                    if any(target_idx == state_idx for target_idx in targets):
+                        continue
+                    transition_map = {
+                        event: target_idx for event, target_idx in zip(selected_events, targets)
+                    }
+                    patterns.append(transition_map)
+        return patterns
 
-        # Build states for this assignment
-        states = [sn.StateNode(str(i)) for i in state_indices]
-        for state_idx in state_indices:
-            for event_idx, event in enumerate(alphabet):
-                target_idx = assignment[state_idx * len(alphabet) + event_idx]
-                states[state_idx].AddTransfer(event, states[target_idx])
+    state_patterns = [build_state_patterns(state_idx) for state_idx in state_indices]
 
-        valid = True
-        for first_event, second_event in event_pairs:
-            pair_found = False
-            for state in states:
-                if first_event not in state.transfers:
-                    continue
-                intermediate = state.transfers[first_event]
-                if second_event in intermediate.transfers:
-                    pair_found = True
+    def recurse(state_idx, transition_maps, states):
+        if state_idx == num_states:
+            state_nodes = [sn.StateNode(str(i)) for i in state_indices]
+            for node_idx, transition_map in enumerate(transition_maps):
+                for event, target_idx in transition_map.items():
+                    state_nodes[node_idx].AddTransfer(event, state_nodes[target_idx])
+
+            valid = True
+            for first_event, second_event in event_pairs:
+                pair_found = False
+                for state in state_nodes:
+                    if first_event not in state.transfers:
+                        continue
+                    intermediate = state.transfers[first_event]
+                    if second_event in intermediate.transfers:
+                        pair_found = True
+                        break
+                if not pair_found:
+                    valid = False
                     break
-            if not pair_found:
-                valid = False
-                break
 
-        if valid:
-            state_spaces.append(ss.StateSpace(len(states), states))
+            if valid:
+                state_spaces.append(ss.StateSpace(len(state_nodes), state_nodes))
+            return
 
+        for transition_map in state_patterns[state_idx]:
+            recurse(state_idx + 1, transition_maps + [transition_map], states)
+
+    recurse(0, [], [])
     return state_spaces
 
 
@@ -568,6 +588,16 @@ def run_iterative_refinement(source_space, strategy=RefinementStrategy.GREEDY, m
         
     return safe_space
 
+def language_compare(source_space, state_space):
+    for i in range(0, 10):
+        source_path = source_space.random_traverse(100)
+        state_path = state_space.random_traverse(100)
+        # if not state_space.valid_language(source_path):
+        #     return False
+        if source_space.valid_language(state_path):
+            return True
+    return False 
+
 def main():
     parser = argparse.ArgumentParser(description='Iterative state-space reconstruction demo')
     parser.add_argument('--max-iterations', type=int, default=20, help='Maximum number of refinement iterations (default: 20)')
@@ -589,14 +619,21 @@ def main():
 
     safe_space = make_greedy_space_deterministic(source_space, 15)
     safe_space.save_to_file('deterministic_safe_space')
-    safe_space.visualize(filename='deterministic_safe_space', location='Graphs')
+    # safe_space.visualize(filename='deterministic_safe_space', location='Graphs')
 
     # Analyze the forks in the safe space
     event_pairs = analyze_forks_single_event(safe_space)
     print(event_pairs)
     state_spaces = generate_state_spaces_from_event_pairs(event_pairs, 3)
-    for i, state_space in enumerate(state_spaces):
-        state_space.visualize(filename=f'generated_space_{i}', location='Graphs')
+    print("Number of generated state spaces:", len(state_spaces))
 
+
+    valid_count = 0
+    for i, state_space in enumerate(state_spaces):
+        if language_compare(source_space, state_space):
+            print(f"State space {i} is valid")
+            state_space.visualize(filename=f'ValidatedSpace{valid_count}', location='Graphs')
+            valid_count += 1
+    print(f"Validated {valid_count} state spaces")
 if __name__ == "__main__":
     main()
