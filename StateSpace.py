@@ -11,7 +11,7 @@ class StateSpace:
         self.eventHistory = ''
         self.stateHistory = ''
         self.states = states
-        self.currentState = self.states[0]
+        self.currentState = self.states[0] if self.states else None
 
     def random_traverse(self, iterations):
         self.eventHistory = ''

@@ -9,43 +9,6 @@ import itertools
 class RefinementStrategy(Enum):
     GREEDY = 'greedy'
 
-
-def build_random_source_state_space(size=6):
-    return ssf.StateSpaceFactory.create_random(size)
-
-
-def reconstruct_from_history(event_history):
-    # Build a minimal deterministic path that reproduces the event string.
-    states = [sn.StateNode(str(i)) for i in range(len(event_history) + 1)]
-    for idx, event in enumerate(event_history):
-        states[idx].AddTransfer(event, states[idx + 1])
-    return ss.StateSpace(len(states), states)
-
-
-def refine_safe_space_greedy(safe_space, event_history):
-    current = safe_space.states[0]
-    for idx, event in enumerate(event_history):
-        if event in current.transfers:
-            current = current.transfers[event]
-            continue
-
-        # Create new suffix states for the remainder of this trace.
-        remainder = event_history[idx:]
-        new_states = [sn.StateNode(str(len(safe_space.states) + i)) for i in range(len(remainder))]
-        current.AddTransfer(remainder[0], new_states[0])
-        for sub_idx, next_event in enumerate(remainder[1:], start=1):
-            new_states[sub_idx - 1].AddTransfer(next_event, new_states[sub_idx])
-        safe_space.states.extend(new_states)
-        safe_space.size = len(safe_space.states)
-        return safe_space
-
-    return safe_space
-
-
-def can_reproduce_history(state_space, event_history):
-    output = state_space.string_traverse(event_history)
-    return len(output) == len(event_history)
-
 def analyze_forks_single_event(state_space):
     """
     Traverse the provided safe space and collect every pair of events
@@ -119,6 +82,17 @@ def analyze_forks_multi_event(state_space):
     dfs(state_space.states[0], '', 0, [], [])
     return forks
 
+def test_to_depth(reduced_event_strings, test_space, depth):
+    """
+    Test if the `test_space` can reproduce the same event sequences as `source_space`
+    up to a given depth. Returns True if they match, False otherwise.
+    """
+
+    for string in reduced_event_strings:
+        if not test_space.valid_language(string):  # Ensure the test space can traverse this string
+            return False
+    return True
+
 def print_forks_analysis(forks):
     """Print fork analysis data in a human-readable format, sorted by depth."""
     if not forks:
@@ -164,265 +138,38 @@ def print_forks_analysis(forks):
     print(f"Distribution by depth: {distribution}")
     print(f"Max depth: {max_depth}")
 
-def extract_loops_from_forks(forks):
-    # Find max depth to initialize forks_by_depth as a list
-    max_depth = max([fork['depth'] for fork in forks]) if forks else 0
-    forks_by_depth = [[] for _ in range(max_depth + 1)]
-    
-    # Populate forks_by_depth with event_strings at each depth
-    for fork in forks:
-        depth = fork['depth']
-        event_string = fork['event_string']
-        history = fork['history']
-        forks_by_depth[depth].append((event_string, history))
-    
-    print("\n=== Forks by Depth ===")
-    for depth, event_strings in enumerate(forks_by_depth):
-        if event_strings:
-            print(f"Depth {depth}: {event_strings}")
 
-    # Build occurrences of full histories and event-strings
-    occurrences_by_event = {}
-    occurrences_by_full = {}
-    all_full_histories = []
-
-    for depth_list in forks_by_depth:
-        for event_string, history in depth_list:
-            # history is a list of parent fork event_strings (strings)
-            full_history = "".join(history + [event_string])
-            all_full_histories.append(full_history)
-
-            occurrences_by_full[full_history] = occurrences_by_full.get(full_history, 0) + 1
-
-            if event_string not in occurrences_by_event:
-                occurrences_by_event[event_string] = []
-            occurrences_by_event[event_string].append(full_history)
-
-    # Loops: strings that either repeat (same full history seen >1) or are length 2 (two characters)
-    loops = []
-    for fh, count in occurrences_by_full.items():
-        if count > 1 or len(fh) == 2:
-            loops.append(fh)
-
-    # Unresolved: full histories seen once and longer than 2
-    unresolved_loops = [fh for fh, count in occurrences_by_full.items() if count == 1 and len(fh) > 2]
-
-    def trim_history(full_history, known_loops):
-        """Remove any known loop substrings from the left of full_history until nothing left or no change."""
-        cur = full_history
-        changed = True
-        while changed and cur:
-            changed = False
-            for loop in known_loops:
-                if cur.startswith(loop):
-                    cur = cur[len(loop):]
-                    changed = True
-                    break
-        return cur
-
-    # Attempt to resolve unresolved_loops by trimming known loops
-    resolved = []
-    for fh in list(unresolved_loops):
-        trimmed = trim_history(fh, loops)
-        if not trimmed:
-            # fully explained by known loops
-            resolved.append(fh)
-            unresolved_loops.remove(fh)
-
-    # Add resolved ones to loops as well
-    for r in resolved:
-        if r not in loops:
-            loops.append(r)
-
-    print("\nDetected loops:", loops)
-    if unresolved_loops:
-        print("Unresolved candidate loops:", unresolved_loops)
-
-    return loops
-
-
-def create_state_space_from_loops(loops):
+def get_all_event_strings_from_tree(det_state_space):
     """
-    Create a StateSpace from a list of loop strings.
-    - `loops` is a list of strings, each string is a sequence of events (characters).
-    - Creates a single zero/start state and one branch per loop.
-    - For each loop, one new state is created per event; the last event's transition returns to the zero state.
+    Collect every completed root-to-leaf event string in the deterministic
+    state-space tree.
 
-    Returns a new `ss.StateSpace` instance.
+    Returns a list of full-length strings such as ['ab', 'ac', 'b'].
     """
-    # Create zero state (numeric naming starting at 0)
-    name_counter = 0
-    zero = sn.StateNode(str(name_counter))
-    name_counter += 1
-    states = [zero]
+    if not det_state_space or not det_state_space.states:
+        return []
 
-    for loop in loops:
-        if not loop:
-            continue
-        # start each loop from the zero state
-        prev = zero
-        # create nodes only for non-final events to avoid stranded nodes
-        for j, event in enumerate(loop):
-            # If this event already exists on the current state, reuse the
-            # existing target instead of overwriting it. This preserves any
-            # previously-created branches that start with the same event.
-            if event in prev.transfers:
-                # follow the existing branch
-                prev = prev.transfers[event]
-                continue
+    event_strings = []
+    visited_states = set()
 
-            if j < len(loop) - 1:
-                node_name = str(name_counter)
-                new_node = sn.StateNode(node_name)
-                states.append(new_node)
-                name_counter += 1
-                prev.AddTransfer(event, new_node)
-                prev = new_node
-            else:
-                # final event transitions back to zero
-                prev.AddTransfer(event, zero)
+    def dfs(state, prefix):
+        if state.name in visited_states:
+            return
+        visited_states.add(state.name)
 
-    return ss.StateSpace(len(states), states)
+        if not state.transfers:
+            if prefix:
+                event_strings.append(prefix)
+            return
+
+        for event in sorted(state.transfers.keys()):
+            dfs(state.transfers[event], prefix + event)
+
+    dfs(det_state_space.states[0], '')
+    return event_strings
 
 
-def create_state_space_from_forks_prefix_merge(loops_or_forks):
-    """
-    Build a state space from loop data using prefix-merging.
-
-    Accepts either:
-    - `loops_or_forks` as a list of loop strings (each string is a sequence of events),
-    - OR `loops_or_forks` as a list of fork tuples `(event_string, history_list)`
-        where `history_list` is a list of event-strings leading up to the fork.
-
-    The function converts fork tuples into full loop strings by concatenating
-    `history_list + [event_string]` and then builds nodes for each prefix.
-    The empty prefix is the zero/start node. Shared prefixes are merged.
-    The final event of each loop transitions back to the zero node.
-
-    This function is non-destructive: if a transfer already exists it will
-    not be overwritten.
-    """
-    name_counter = 0
-    zero = sn.StateNode(str(name_counter))
-    name_counter += 1
-    states = [zero]
-
-    prefix_map = {"": zero}
-
-    # Normalize input: support fork dicts, fork tuples, or loop strings
-    normalized_loops = []
-    for item in loops_or_forks:
-        if not item:
-            continue
-        # fork dict: {'event_string': ..., 'history': [...]}
-        if isinstance(item, dict) and 'event_string' in item and 'history' in item:
-            event_string = item['event_string']
-            history = item['history']
-            if not isinstance(history, (list, tuple)):
-                history = list(history)
-            full = "".join(list(history) + [event_string])
-            normalized_loops.append(full)
-            continue
-        # fork tuple: (event_string, history_list)
-        if isinstance(item, (list, tuple)) and len(item) == 2:
-            event_string, history = item
-            if not isinstance(history, (list, tuple)):
-                history = list(history)
-            full = "".join(list(history) + [event_string])
-            normalized_loops.append(full)
-            continue
-        # otherwise assume it's already a loop string
-        normalized_loops.append(str(item))
-    for loop in normalized_loops:
-        if not loop:
-            continue
-        cur = ""
-        for i, event in enumerate(loop):
-            nxt = cur + event
-            # If final event, ensure it points to zero (loop closure)
-            if i == len(loop) - 1:
-                src = prefix_map[cur]
-                if event not in src.transfers:
-                    src.AddTransfer(event, zero)
-                # done with this loop
-                break
-
-            # Ensure node exists for nxt prefix
-            if nxt not in prefix_map:
-                node = sn.StateNode(str(name_counter))
-                name_counter += 1
-                states.append(node)
-                prefix_map[nxt] = node
-
-            # Add transfer if missing
-            src = prefix_map[cur]
-            dst = prefix_map[nxt]
-            if event not in src.transfers:
-                src.AddTransfer(event, dst)
-
-            cur = nxt
-
-    return ss.StateSpace(len(states), states)
-
-def get_possible_transitions(forks):
-
-    def get_full_history(fork):
-        return fork['history'] + [fork['event_string']]
-    
-    simplified_forks = []
-    possible_transitions = []
-    for fork in forks:
-        event = fork['event_string']
-        history = fork['history']
-        depth = fork['depth']
-        full_history = get_full_history(fork)
-        print(full_history, "bubaf")
-        simple_fork = (event, history)
-        simplified_forks.append((event, history))
-
-        for i in range(len(full_history)):
-            if i == 0:
-                continue
-            transition = (full_history[i-1], full_history[i])
-            if transition not in possible_transitions:
-                possible_transitions.append(transition)
-    return possible_transitions   
-
-def forks_to_histories(forks):
-    """
-    Convert a list of fork dictionaries into a list of full histories.
-    Each history is the concatenation of the fork's parent history and its event string.
-    """
-    histories = []
-    for fork in forks:
-        if 'history' in fork and 'event_string' in fork:
-            full_history = fork['history'] + [fork['event_string']]
-            histories.append(full_history)
-    return histories
-
-
-def count_possible_state_spaces(event_pairs, num_states):
-    """
-    Compute the number of deterministic state spaces with `num_states` states
-    that satisfy the no-self-loop constraint and use the events present in
-    `event_pairs`.
-
-    This is the total number of possible transition assignments before any
-    sequential-pair filtering is applied.
-    """
-    if num_states <= 0:
-        return 0
-
-    alphabet = sorted({event for pair in event_pairs for event in pair})
-    if not alphabet:
-        return 0
-
-    choices_per_transition = num_states - 1
-    total_transitions = num_states * len(alphabet)
-    return choices_per_transition ** total_transitions
-
-
-def generate_state_spaces_from_event_pairs(event_pairs, num_states):
+def generate_state_spaces_from_event_pairs(event_pairs, num_states, source_space_event_strings):
     """
     Generate every possible deterministic StateSpace with `num_states` states
     that can realize the provided sequential event pairs.
@@ -463,13 +210,23 @@ def generate_state_spaces_from_event_pairs(event_pairs, num_states):
 
     state_patterns = [build_state_patterns(state_idx) for state_idx in state_indices]
 
-    def recurse(state_idx, transition_maps, states):
-        if state_idx == num_states:
-            state_nodes = [sn.StateNode(str(i)) for i in state_indices]
-            for node_idx, transition_map in enumerate(transition_maps):
-                for event, target_idx in transition_map.items():
-                    state_nodes[node_idx].AddTransfer(event, state_nodes[target_idx])
+    def build_state_space_from_transition_maps(transition_maps):
+        needed_states = max(1, len(transition_maps))
+        for transition_map in transition_maps:
+            for target_idx in transition_map.values():
+                needed_states = max(needed_states, target_idx + 1)
 
+        state_nodes = [sn.StateNode(str(i)) for i in range(needed_states)]
+        for node_idx, transition_map in enumerate(transition_maps):
+            for event, target_idx in transition_map.items():
+                state_nodes[node_idx].AddTransfer(event, state_nodes[target_idx])
+        return ss.StateSpace(len(state_nodes), state_nodes)
+
+    depth_event_strings = {}
+
+    def recurse(state_idx, transition_maps, states, depth):
+        if state_idx == num_states:
+            state_nodes = build_state_space_from_transition_maps(transition_maps).states
             valid = True
             for first_event, second_event in event_pairs:
                 pair_found = False
@@ -485,13 +242,23 @@ def generate_state_spaces_from_event_pairs(event_pairs, num_states):
                     break
 
             if valid:
-                state_spaces.append(ss.StateSpace(len(state_nodes), state_nodes))
+                state_spaces.append(build_state_space_from_transition_maps(transition_maps))
             return
 
-        for transition_map in state_patterns[state_idx]:
-            recurse(state_idx + 1, transition_maps + [transition_map], states)
+        unique_event_strings = {}
+        if depth not in depth_event_strings.keys():
+            for string in source_space_event_strings:
+                unique_event_strings[string[:depth]] = True
+            depth_event_strings[depth] = unique_event_strings.keys()
 
-    recurse(0, [], [])
+        for transition_map in state_patterns[state_idx]:
+            candidate_transition_maps = transition_maps + [transition_map]
+            partial_space = build_state_space_from_transition_maps(candidate_transition_maps)
+
+            if test_to_depth(depth_event_strings[depth], partial_space, depth):
+                recurse(state_idx + 1, candidate_transition_maps, states, depth + 1)
+
+    recurse(0, [], [], 0)
     return state_spaces
 
 
@@ -544,59 +311,17 @@ def make_greedy_space_deterministic(source_space, max_depth=3):
     dfs(source_space.states[0], zero, max_depth)
     return ss.StateSpace(len(states), states)
 
-def run_iterative_refinement(source_space, strategy=RefinementStrategy.GREEDY, max_iterations=20):
-    print('Iterative state-space reconstruction demo')
-    print(f'Using refinement strategy: {strategy.value}')
-    print(f'Max iterations: {max_iterations}')
-    source_space.visualize(filename='source_space', location='Iterations')
-    initial_iterations = 20
-    source_space.random_traverse(initial_iterations)
-    event_history = source_space.eventHistory
-    print('Initial trace length:', len(event_history))
-    print('Initial event history:', event_history)
-
-    safe_space = reconstruct_from_history(event_history)
-    safe_space.visualize(filename=f'safe_space_0', location='Iterations')
-
-    print('Initial safe space reconstructed with', safe_space.size, 'states.')
-
-    stable_rounds = 0
-    for round_num in range(1, max_iterations + 1):
-        print('\nRound', round_num)
-        source_space.eventHistory = ''
-        source_space.stateHistory = ''
-        source_space.currentState = source_space.states[0]
-        source_space.random_traverse(initial_iterations)
-        event_history = source_space.eventHistory
-        print('Observed event history:', event_history)
-
-        can_reproduce = can_reproduce_history(safe_space, event_history)
-        if can_reproduce:
-            print('Safe space already reproduces this trace exactly.')
-            stable_rounds += 1
-        else:
-            print('Mismatch detected. Refining safe space...')
-            if strategy == RefinementStrategy.GREEDY:
-                safe_space = refine_safe_space_greedy(safe_space, event_history)
-            print('Safe space updated to', safe_space.size, 'states.')
-            safe_space.visualize(filename=f'safe_space_{round_num}', location='Iterations')
-            stable_rounds = 0
-
-        if stable_rounds >= 3:
-            print('Safe space has reproduced three consecutive traces exactly; stopping.')
-            return safe_space
-        
-    return safe_space
-
 def language_compare(source_space, state_space):
+    valid = True
     for i in range(0, 10):
         source_path = source_space.random_traverse(100)
         state_path = state_space.random_traverse(100)
         # if not state_space.valid_language(source_path):
         #     return False
         if source_space.valid_language(state_path):
-            return True
-    return False 
+            if state_space.valid_language(source_path):
+                return True
+    return False
 
 def main():
     parser = argparse.ArgumentParser(description='Iterative state-space reconstruction demo')
@@ -609,7 +334,7 @@ def main():
     if args.from_save:
         source_space = ssf.StateSpaceFactory.load_from_file(args.from_save)
     else:
-        source_space = build_random_source_state_space(size=3)
+        source_space = ssf.StateSpaceFactory.create_random(3)
         source_space.save_to_file('source_space')
     
     source_space.visualize(filename='source_space', location='Graphs')
@@ -619,21 +344,35 @@ def main():
 
     safe_space = make_greedy_space_deterministic(source_space, 15)
     safe_space.save_to_file('deterministic_safe_space')
+
     # safe_space.visualize(filename='deterministic_safe_space', location='Graphs')
 
     # Analyze the forks in the safe space
     event_pairs = analyze_forks_single_event(safe_space)
     print(event_pairs)
-    state_spaces = generate_state_spaces_from_event_pairs(event_pairs, 3)
-    print("Number of generated state spaces:", len(state_spaces))
+    state_spaces_3 = generate_state_spaces_from_event_pairs(event_pairs, 3, get_all_event_strings_from_tree(safe_space))
+    print("Number of generated state spaces:", len(state_spaces_3))
 
 
     valid_count = 0
-    for i, state_space in enumerate(state_spaces):
+    for i, state_space in enumerate(state_spaces_3):
         if language_compare(source_space, state_space):
-            print(f"State space {i} is valid")
-            state_space.visualize(filename=f'ValidatedSpace{valid_count}', location='Graphs')
+            print(f"State space {i} is valid in 3 state model")
+            state_space.visualize(filename=f'ValidatedSpace_3_{valid_count}', location='Graphs')
             valid_count += 1
-    print(f"Validated {valid_count} state spaces")
+    print(f"Validated {valid_count} state spaces in 3 state model")
+
+    state_spaces_4 = generate_state_spaces_from_event_pairs(event_pairs, 4, get_all_event_strings_from_tree(safe_space))
+    print("Number of generated state spaces:", len(state_spaces_4))
+
+    print ('~'*40)
+
+    valid_count = 0
+    for i, state_space in enumerate(state_spaces_4):
+        if language_compare(source_space, state_space):
+            print(f"State space {i} is valid in 4 state model")
+            state_space.visualize(filename=f'ValidatedSpace_4_{valid_count}', location='Graphs')
+            valid_count += 1
+    print(f"Validated {valid_count} state spaces in 4 state model")
 if __name__ == "__main__":
     main()
