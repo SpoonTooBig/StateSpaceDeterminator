@@ -313,16 +313,62 @@ def make_greedy_space_deterministic(source_space, max_depth=3):
 
 def language_compare(source_space, state_space):
     valid = True
-    for i in range(0, 10):
-        source_path = source_space.random_traverse(100)
-        state_path = state_space.random_traverse(100)
-        # if not state_space.valid_language(source_path):
-        #     return False
-        if source_space.valid_language(state_path):
-            if state_space.valid_language(source_path):
-                return True
+    source_path = source_space.random_traverse(100)
+    state_path = state_space.random_traverse(100)
+    # if not state_space.valid_language(source_path):
+    #     return False
+    if source_space.valid_language(state_path):
+        if state_space.valid_language(source_path):
+            return True
     return False
 
+
+def language_compare_2(source_space, state_space, max_depth=4, alphabet=None):
+    """
+    Example bounded deterministic comparison.
+
+    Instead of using random traversals, this checks a fixed set of event strings
+    up to a given depth. It uses an observable alphabet of event labels rather
+    than inspecting hidden states directly.
+    """
+    if not source_space or not state_space:
+        return False
+
+    if alphabet is None:
+        observed_events = {
+            event for event in getattr(source_space, 'eventHistory', '')
+            if event.isalpha()
+        }
+        alphabet = sorted(observed_events) if observed_events else ['a', 'b', 'c']
+    else:
+        alphabet = sorted(alphabet)
+
+    if not alphabet:
+        return True
+
+    def generate_strings(prefix, depth):
+        if depth == 0:
+            return [prefix]
+        strings = []
+        for event in alphabet:
+            strings.extend(generate_strings(prefix + event, depth - 1))
+        return strings
+
+    for depth in range(1, max_depth + 1):
+        for candidate in generate_strings('', depth):
+            if source_space.valid_language(candidate) != state_space.valid_language(candidate):
+                return False
+    return True
+
+
+def validate_spaces(spaces, source_space):
+    valid_count = 0
+    for i, state_space in enumerate(spaces):
+        if language_compare(source_space, state_space):
+            print(f"State space {i} is valid")
+            state_space.visualize(filename=f'ValidatedSpace_{valid_count}', location='Validated_Spaces')
+            valid_count += 1
+    return valid_count
 def main():
     parser = argparse.ArgumentParser(description='Iterative state-space reconstruction demo')
     parser.add_argument('--max-iterations', type=int, default=20, help='Maximum number of refinement iterations (default: 20)')
