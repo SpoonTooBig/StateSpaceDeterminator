@@ -14,13 +14,17 @@ class StateSpace:
         self.currentState = self.states[0] if self.states else None
 
     def random_traverse(self, iterations):
+        self.currentState = self.states[0] if self.states else None
         self.eventHistory = ''
         self.stateHistory = ''
         for i in range(0, iterations):
+            if self.currentState is None:
+                break
             self.stateHistory += self.currentState.name
             event = random.choice(list(self.currentState.transfers))
             self.eventHistory += str(event)
             self.currentState = self.currentState.transfers[event]
+        self.currentState = self.states[0] if self.states else None
         return self.eventHistory
 
 

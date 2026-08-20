@@ -4,6 +4,8 @@ import StateSpaceFactory as ssf
 from enum import Enum
 import argparse
 import itertools
+import shutil
+from pathlib import Path
 
 
 class RefinementStrategy(Enum):
@@ -311,60 +313,68 @@ def make_greedy_space_deterministic(source_space, max_depth=3):
     dfs(source_space.states[0], zero, max_depth)
     return ss.StateSpace(len(states), states)
 
-def language_compare(source_space, state_space):
-    valid = True
-    source_path = source_space.random_traverse(100)
-    state_path = state_space.random_traverse(100)
-    # if not state_space.valid_language(source_path):
-    #     return False
-    if source_space.valid_language(state_path):
-        if state_space.valid_language(source_path):
-            return True
-    return False
+def generate_bounded_words(alphabet, max_depth):
+    """Generate all words up to the given depth from the provided observable alphabet."""
+    if not alphabet:
+        return []
+
+    words = ['']
+    for depth in range(1, max_depth + 1):
+        for chars in itertools.product(alphabet, repeat=depth):
+            words.append(''.join(chars))
+    return words
 
 
-def language_compare_2(source_space, state_space, max_depth=4, alphabet=None):
+def collect_observable_events(space, traversal_length=100):
+    """Run a traversal so the observable event history is populated, then extract the alphabet."""
+    if space is None or not getattr(space, 'states', None):
+        return set()
+
+    space.random_traverse(traversal_length)
+    history = getattr(space, 'eventHistory', '')
+    return {ch for ch in history if ch.isalpha()}
+
+
+def infer_observable_alphabet(*spaces, traversal_length=100):
+    """Infer the observable alphabet by first running a traversal on each space."""
+    observed = set()
+    for space in spaces:
+        observed.update(collect_observable_events(space, traversal_length=traversal_length))
+
+    if observed:
+        return sorted(observed)
+    return ['a', 'b', 'c']
+
+
+def language_compare(source_space, state_space, alphabet=None, max_depth=4):
     """
-    Example bounded deterministic comparison.
+    Deterministic bounded-language check.
 
-    Instead of using random traversals, this checks a fixed set of event strings
-    up to a given depth. It uses an observable alphabet of event labels rather
-    than inspecting hidden states directly.
+    Instead of using a single random traversal, this compares the observable
+    language of both spaces over all words up to a small bounded depth.
     """
-    if not source_space or not state_space:
+    if source_space is None or state_space is None:
         return False
 
     if alphabet is None:
-        observed_events = {
-            event for event in getattr(source_space, 'eventHistory', '')
-            if event.isalpha()
-        }
-        alphabet = sorted(observed_events) if observed_events else ['a', 'b', 'c']
-    else:
-        alphabet = sorted(alphabet)
+        alphabet = infer_observable_alphabet(source_space, state_space)
 
-    if not alphabet:
-        return True
-
-    def generate_strings(prefix, depth):
-        if depth == 0:
-            return [prefix]
-        strings = []
-        for event in alphabet:
-            strings.extend(generate_strings(prefix + event, depth - 1))
-        return strings
-
-    for depth in range(1, max_depth + 1):
-        for candidate in generate_strings('', depth):
-            if source_space.valid_language(candidate) != state_space.valid_language(candidate):
-                return False
+    for word in generate_bounded_words(alphabet, max_depth):
+        source_accepts = source_space.valid_language(word)
+        candidate_accepts = state_space.valid_language(word)
+        if source_accepts != candidate_accepts:
+            return False
     return True
 
 
-def validate_spaces(spaces, source_space):
+def validate_spaces(spaces, source_space, alphabet=None, max_depth=4):
+    folder = Path("Validated_Spaces")
+    if folder.exists():
+        shutil.rmtree(folder)
+    folder.mkdir(parents=True, exist_ok=True)
     valid_count = 0
     for i, state_space in enumerate(spaces):
-        if language_compare(source_space, state_space):
+        if language_compare(source_space, state_space, alphabet=alphabet, max_depth=max_depth):
             print(f"State space {i} is valid")
             state_space.visualize(filename=f'ValidatedSpace_{valid_count}', location='Validated_Spaces')
             valid_count += 1
