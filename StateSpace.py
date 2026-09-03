@@ -3,7 +3,11 @@ import random
 import StateNode as sn
 from graphviz import Digraph
 import itertools
-
+"""
+This file contains the StateSpace class, which represents a state space.
+It uses the StateNode class to represent nodes in the state space,
+and a few methods for traversal, visualization, and validation.
+"""
 class StateSpace:    
     ECHR = 97 
     def __init__(self, size, states):

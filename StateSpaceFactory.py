@@ -2,6 +2,9 @@ import StateSpace as ss
 import StateNode as sn
 import random
 
+"""
+This file is a factory for conveniently creating state spaces using a variety of methods.
+"""
 class StateSpaceFactory:
     @staticmethod
     def create_random(size):        

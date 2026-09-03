@@ -1,3 +1,6 @@
+"""
+Simple class to represent a state node in a state space.
+"""
 class StateNode:    
     def __init__(self, name, transfers=None):
         self.name = name

@@ -7,7 +7,10 @@ import itertools
 import shutil
 from pathlib import Path
 
-
+""" 
+This file contatins the main functions for the iterative state space reconstruction strategy.
+It is intended to be used as a module in other files (ie main.py)
+"""
 class RefinementStrategy(Enum):
     GREEDY = 'greedy'
 

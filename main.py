@@ -4,7 +4,7 @@ import StateSpaceFactory as ssf
 import IterativeDetermination as id
 
 def main():
-
+    """Interact with other files to randomly generate a state space and then reproduce it without observing its states."""
     print('loading state space')
     three_state_ss = ssf.StateSpaceFactory.create_random(3)
     three_state_ss.visualize(filename='three_state_ss')
